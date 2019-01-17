@@ -1,21 +1,18 @@
 -*- Mode: org; mode: auto-fill; fill-column: 76; org-download-image-dir: "~/Documents/leandro/scrapping-tutorial/img" -*-
 
-* Scraping tutorial
+* Scraping tutorial: Web Scraping Craigslist
   
 
-     This tutorial is based on [[Scrapy Tutorial: Web Scraping
-      Craigslist][https://python.gotrained.com/scrapy-tutorial-web-scraping-craigslist/]]
+  This tutorial is based on [[https://python.gotrained.com/scrapy-tutorial-web-scraping-craigslist/]]
   
-     Learn objectives:
+  Learn objectives:
      * Get familiar with Scrapy. Scrapy is one of the most popular and powerful
        Python scraping frameworks.
      * I did my first web scrapping about 2008 using beautiful soup and I want
        to see how the technology changed
      * Get familiar with scrapping craiglist and prepare for the Housing Market
        scrapping project
-
        
-
 ** Tutorial
 
    
@@ -148,7 +145,7 @@
     #+end_src
 
 
-    Run form scrapping-tutorial/craiglist/
+    Run from scrapping-tutorial/craiglist/
     
     #+begin_src sh
     scrapy crawl jobs -o result-jobs-one-page.csv
@@ -183,11 +180,239 @@
       2019-01-16 11:32:38 [scrapy.core.engine] INFO: Spider closed (finished)
 
     #+END_EXAMPLE
+
+*** Scrapping multiple pages    
+   
+    To do the same for all the result pages of Craigslist’s Architecture &
+    Engineering jobs, you need to extract the “next” URLs and then apply the
+    same parse() function on them.
+
+
+    Click right button in the next buttom and select inspect
+    #+BEGIN_SRC html
+      <a href="/search/egr?s=120" class="button next" title="next page">next &gt; </a>
+    #+END_SRC
+    
+    Add this code
+
+    #+begin_src python
+      # -*- coding: utf-8 -*-
+      import scrapy
+      from scrapy import Request
+
+      class JobsSpider(scrapy.Spider):
+          name = "jobsall"
+          allowed_domains = ["craigslist.org"]
+          start_urls = ["https://newyork.craigslist.org/search/egr"]
+
+          def parse(self, response):
+              jobs = response.xpath('//p[@class="result-info"]')
+
+              # extract titles, addres n urls
+              for job in jobs:
+
+                  title = job.xpath('a/text()').extract_first()
+
+                  # extract_first("") which means if there is no result, the result is “”.
+                  # [2:-1] removes the parenthesis
+                  address = job.xpath('span[@class="result-meta"]/span[@class="result-hood"]/text()').extract_first("")[2:-1]
+
+                  relative_url = job.xpath('a/@href').extract_first()
+
+                  absolute_url = response.urljoin(relative_url)
+
+                  yield{'URL':absolute_url, 'Title':title, 'Address':address}
+
+              # scrap next page
+              relative_next_url = response.xpath('//a[@class="button next"]/@href').extract_first()
+              absolute_next_url = response.urljoin(relative_next_url)
+              yield Request(absolute_next_url, callback=self.parse)
+    #+end_src
+
+    Run form scrapping-tutorial/craiglist/
+    
+    #+begin_src sh
+    scrapy crawl jobsall -o result-jobs-multi-pages.csv
+    #+end_src
+
+    #+BEGIN_EXAMPLE
+      2019-01-16 22:32:17 [scrapy.statscollectors] INFO: Dumping Scrapy stats:
+      {'downloader/request_bytes': 835,
+       'downloader/request_count': 3,
+       'downloader/request_method_count/GET': 3,
+       'downloader/response_bytes': 41298,
+       'downloader/response_count': 3,
+       'downloader/response_status_count/200': 3,
+       'dupefilter/filtered': 1,
+       'finish_reason': 'finished',
+       'finish_time': datetime.datetime(2019, 1, 17, 6, 32, 17, 16011),
+       'item_scraped_count': 223,  <==========================
+       'log_count/DEBUG': 228,
+       'log_count/INFO': 8,
+       'memusage/max': 54484992,
+       'memusage/startup': 54484992,
+       'request_depth_max': 2,
+       'response_received_count': 3,
+       'scheduler/dequeued': 2,
+       'scheduler/dequeued/memory': 2,
+       'scheduler/enqueued': 2,
+       'scheduler/enqueued/memory': 2,
+       'start_time': datetime.datetime(2019, 1, 17, 6, 32, 15, 471444)}
+      2019-01-16 22:32:17 [scrapy.core.engine] INFO: Spider closed (finished)
+
+    #+END_EXAMPLE
+
+    223 job posting was scrapped
+
+*** Scrapping all post and job description 
+
+    In this spider, we will open the URL of each job and scrape its description.
+    So we are going to create the function parse_page that knows how to parse
+    job description page
+    
+    To check page with description. Open the first entry: https://newyork.craigslist.org/mnh/egr/d/brooklyn-engineer-manager-arlo-nomad/6796659355.html
+
+
+    #+DOWNLOADED: /tmp/screenshot.png @ 2019-01-16 22:44:27
+    [[file:Scraping%20tutorial/screenshot_2019-01-16_22-44-27.png]]
+    
+    the html tag of interested is:
+
+    #+BEGIN_SRC html
+      <section id="posting body">
+
+        <!-- few html tags (most div) -->
+
+        Arlo Hotels is an independent lifestyle hotel now actively seeking a dynamic
+        Engineer Manager for our Arlo NoMad property! <br>
+        <br>
+        Are you someone who is passionate about People, driven by Purpose and
+        Clever in your approach? If so keep on reading!! Here at Arlo we strive to
+        create a sense of awe that leaves those we touch wanting more"...... <br>
+        <br>
+        SUMMARY DESCRIPTION: <br>
+        <br>
+        The Engineer Manager is responsible for effectively leading the
+        engineering team in the execution of all maintenance of the overall hotel.
+        From essential upgrading, installation and necessary purchase of all HVAC
+        systems, mechanical, electrical and related equipment. <br>
+
+        <!-- More text and the END -->
+  
+      </section>
+    #+END_SRC
+
+    For compensation and employment type:
+    #+BEGIN_SRC html
+      <span>compensation: <b>$65,000.00 - $75,000.00 USD</b></span>
+      <span>employment type: <b>full-time</b></span>
+    #+END_SRC
+    
+    The code:
+    #+begin_src python
+      import scrapy
+      from scrapy import Request
+
+      class JobsSpider(scrapy.Spider):
+          name = "jobscontent"
+          allowed_domains = ["craigslist.org"]
+          start_urls = ["https://newyork.craigslist.org/search/egr"]
+
+          def parse(self, response):
+              jobs = response.xpath('//p[@class="result-info"]')
+
+              # extract titles, addres n urls
+              for job in jobs:
+
+                  title = job.xpath('a/text()').extract_first()
+
+                  # extract_first("") which means if there is no result, the result is “”.
+                  # [2:-1] removes the parenthesis
+                  address = job.xpath('span[@class="result-meta"]/span[@class="result-hood"]/text()').extract_first("")[2:-1]
+
+                  relative_url = job.xpath('a/@href').extract_first()
+
+                  absolute_url = response.urljoin(relative_url)
+
+                  yield{'URL':absolute_url, 'Title':title, 'Address':address}
+
+              # scrap next page
+              relative_next_url = response.xpath('//a[@class="button next"]/@href').extract_first()
+              absolute_next_url = response.urljoin(relative_next_url)
+
+              # call parse_page funtion and pass the metada to the function
+              yield Request(absolute_url, callback=self.parse_page, meta={'URL': absolute_url, 'Title': title, 'Address':address})
+
+
+          def parse_page(self, response):
+              # parse page with description
+
+              # acces the metada passed
+              url = response.meta.get('URL')
+              title = response.meta.get('Title')
+              address = response.meta.get('Address')
+
+              description = "".join(line for line in response.xpath('//*[@id="postingbody"]/text()').extract()).strip()
+              compensation = response.xpath('//p[@class="attrgroup"]/span[1]/b/text()').extract_first()
+              employment_type  = response.xpath('//p[@class="attrgroup"]/span[2]/b/text()').extract_first()
+
+              yield{'URL': url, 'Title': title, 'Address':address, 'Description':description, 'Compensation':compensation, 'Employment Type':employment_type}
+    #+end_src
+
+
+    Run from scrapping-tutorial/craiglist/
+    testing json output
+    #+begin_src sh
+    scrapy crawl jobscontent -o result-jobs-multi-pages-content.json
+    #+end_src
+    
+    #+BEGIN_EXAMPLE
+      2019-01-16 22:52:58 [scrapy.statscollectors] INFO: Dumping Scrapy stats:
+      {'downloader/request_bytes': 883,
+       'downloader/request_count': 3,
+       'downloader/request_method_count/GET': 3,
+       'downloader/response_bytes': 26750,
+       'downloader/response_count': 3,
+       'downloader/response_status_count/200': 3,
+       'finish_reason': 'finished',
+       'finish_time': datetime.datetime(2019, 1, 17, 6, 52, 58, 215687),
+       'item_scraped_count': 121,   <====
+       'log_count/DEBUG': 125,
+       'log_count/INFO': 8,
+       'memusage/max': 54603776,
+       'memusage/startup': 54603776,
+       'request_depth_max': 1,
+       'response_received_count': 3,
+       'scheduler/dequeued': 2,
+       'scheduler/dequeued/memory': 2,
+       'scheduler/enqueued': 2,
+       'scheduler/enqueued/memory': 2,
+       'start_time': datetime.datetime(2019, 1, 17, 6, 52, 56, 908061)}
+      2019-01-16 22:52:58 [scrapy.core.engine] INFO: Spider closed (finished)
+    #+END_EXAMPLE
+
+    #+BEGIN_SRC json
+      [
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/brooklyn-engineer-manager-arlo-nomad/6796659355.html", "Title": "Engineer Manager - Arlo NoMad", "Address": "Flatiron"},
+      {"URL": "https://newyork.craigslist.org/que/egr/d/junior-architect/6796608638.html", "Title": "JUNIOR ARCHITECT", "Address": "NEW YORK"},
+      {"URL": "https://newyork.craigslist.org/que/egr/d/astoria-draft-person-certified-arch-cad/6796590945.html", "Title": "Draft Person Certified Arch Cad  Const. Safety Plans", "Address": "Queens"},
+      {"URL": "https://newyork.craigslist.org/fct/egr/d/engineer-designer-electrical/6796503693.html", "Title": "Engineer/Designer Electrical", "Address": "Norwalk, CT"},
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/brooklyn-mechanical-engineer/6796431994.html", "Title": "Mechanical Engineer Consultant...School Inspections...NYC", "Address": "New York"},
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/harriman-professional-land-surveyor/6796408356.html", "Title": "Professional Land Surveyor", "Address": "Harriman"},
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/new-york-city-experienced-construction/6796336132.html", "Title": "Experienced CONSTRUCTION Project Manager", "Address": "Midtown West"},
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/new-york-city-senior-project-manager/6796329945.html", "Title": "Senior Project Manager", "Address": ""},
+      {"URL": "https://newyork.craigslist.org/mnh/egr/d/intermediate-architect/6796326890.html", "Title": "Intermediate Architect", "Address": "Flatiron"}
+      ]
+    #+END_SRC
+
+    #+RESULTS:
     
 ** References
 
    This tutorial is based on:
-   * Tutorial:  [[Scrapy Tutorial: Web Scraping Craigslist][https://python.gotrained.com/scrapy-tutorial-web-scraping-craigslist/]]
+   * Tutorial:  Scrapy Tutorial: Web Scraping Craigslist: https://python.gotrained.com/scrapy-tutorial-web-scraping-craigslist/
    * Code: https://github.com/GoTrained/Scrapy-Craigslist/
    * Scrapped web site: https://newyork.craigslist.org/search/egr
    * XPath cheat sheet: https://devhints.io/xpath#prefixes
+
+
