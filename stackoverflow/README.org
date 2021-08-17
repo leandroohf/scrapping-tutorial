@@ -1,0 +1,9 @@
+
+* Stackoverflow scrapping tutorial
+
+  Refs:
+  * https://realpython.com/web-scraping-with-scrapy-and-mongodb
+  * https://docs.mongodb.com/manual/tutorial/install-mongodb-on-os-x/
+
+  Motivation:
+  * Learn how to store data in mongodb 
